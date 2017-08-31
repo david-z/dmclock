@@ -43,9 +43,7 @@ namespace crimson {
 	rho_prev_req(global_rho),
 	my_delta(0),
 	my_rho(0)
-      {
-	// empty
-      }
+      { /* empty */ }
 
       static inline OrigTracker create(Counter the_delta, Counter the_rho) {
 	return OrigTracker(the_delta, the_rho);
@@ -78,6 +76,74 @@ namespace crimson {
     }; // struct OrigTracker
 
 
+    // BorrowingTracker always returns a positive delta and rho. If
+    // not enough responses have come in to allow that, we will borrow
+    // a future response and repay it later.
+    class BorrowingTracker {
+      Counter delta_prev_req;
+      Counter rho_prev_req;
+      Counter delta_borrow;
+      Counter rho_borrow;
+
+    public:
+
+      BorrowingTracker(Counter global_delta, Counter global_rho) :
+	delta_prev_req(global_delta),
+	rho_prev_req(global_rho),
+	delta_borrow(0),
+	rho_borrow(0)
+      { /* empty */ }
+
+      static inline BorrowingTracker create(Counter the_delta, Counter the_rho) {
+	return BorrowingTracker(the_delta, the_rho);
+      }
+
+      inline Counter calc_with_borrow(const Counter& global,
+				      const Counter& previous,
+				      Counter& borrow) {
+	Counter result = global - previous;
+	if (0 == result) {
+	  // if no replies have come in, borrow one from the future
+	  ++borrow;
+	  return 1;
+	} else if (result > borrow) {
+	  // if we can give back all of what we borrowed, do so
+	  result -= borrow;
+	  borrow = 0;
+	  return result;
+	} else {
+	  // can only return part of what was borrowed in order to
+	  // return positive
+	  borrow = borrow - result + 1;
+	  return 1;
+	}
+      }
+
+      inline ReqParams prepare_req(Counter& the_delta, Counter& the_rho) {
+	Counter delta_out =
+	  calc_with_borrow(the_delta, delta_prev_req, delta_borrow);
+	Counter rho_out =
+	  calc_with_borrow(the_rho, rho_prev_req, rho_borrow);
+	delta_prev_req = the_delta;
+	rho_prev_req = the_rho;
+	return ReqParams(uint32_t(delta_out), uint32_t(rho_out));
+      }
+
+      inline void resp_update(PhaseType phase,
+			      Counter& the_delta,
+			      Counter& the_rho) {
+	++the_delta;
+	if (phase == PhaseType::reservation) {
+	  ++the_rho;
+	}
+      }
+
+      inline Counter get_last_delta() const {
+	return delta_prev_req;
+      }
+    }; // struct BorrowingTracker
+
+
     // AltTracker primarily exists as a proof-of-concept of an
     // alternate tracker. It has not been tested extensively. The key
     // idea is that the global delta gets incremented with each
@@ -100,9 +166,7 @@ namespace crimson {
 	delta_prev_req(_delta_prev_req),
 	rho_prev_req(_rho_prev_req),
 	rho_pool(0)
-      {
-	// empty
-      }
+      { /* empty */ }
 
       static AltTracker create(Counter the_delta, Counter the_rho) {
 	return AltTracker(the_delta, the_rho);
